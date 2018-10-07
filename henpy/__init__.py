@@ -1,4 +1,4 @@
-import henpy.models
-import henpy.constants
-import henpy.searchers
-import henpy.utilities
+from . import models
+from . import constants
+from . import searchers
+from . import utilities

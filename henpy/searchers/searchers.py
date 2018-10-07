@@ -48,10 +48,11 @@ class JavlibrarySearcher(SiteSearcher):
         self.image_re = re.compile(r'video_jacket_img" src="(.*\.jpg)" ')
         self.code_re = re.compile(r'ID:<\/td>\s+<td class="text">([\w-]+)<\/td>', re.MULTILINE)
         # regex for capturing multiple search entries
-        # Captures the following groups: link appending for the entry and the entry-code
-        self.multi_results_re = re.compile(r"""f="\.(.*)" title*.*<div class="id">([\w-]*)<""")
+        # Captures the following groups: link appending for the entry (suffix), entry-code and image_url.
+        # Suffix contains the preceeding forward slash
+        self.multi_results_re = re.compile(r"""f="\.(.*)" title*.*<div class="id">([\w-]*)<\/div><img src="(\/\/[\w+\.\/]+)""")
 
-        # image_path regex
+        # image_url regex
         self.image_re = re.compile(r'video_jacket_img" src="(\/\/[\w+\.\/]+)"')
 
         # Session initialization
@@ -65,53 +66,59 @@ class JavlibrarySearcher(SiteSearcher):
             return ""
         return obj.group(1)
 
-    def _search_code(self, code, lang):
+    def _search_code(self, code, lang=None):
         """Performs a search of the code against the selected web database with specified language
         @args:
             code: string. Code to search
+            lang (): Default None -> first language in self.langs
         @returns
             request object if successful, raises if status
         """
+        if lang is None:
+            lang = self.langs[0]
         site = self.search_path.format(lang=lang, code=code)
         req = self.s.get(site)
         req.raise_for_status()
         return req
 
-    def _normalize_search(self, code, req, lang):
+    def _normalize_search(self, code, req):
         """Handles the raw search result. Correcting for missing / duplicate entries
         @args
             req: request object to process for information
         @returns
-            Single request object containing the database page for the code OR
-            the selected page in the case of multiple entries
-            raises if not found
+            response containing the single page if only one entry is present,
+            or an iterable of all page_paths if multiple matching detected
         """
         req.raise_for_status()
+        lang = self.langs[0]
         if req.url.startswith(self.fail_path.format(lang)):
             # multi re returns a list of (path, code) tuples
             multi = self.multi_results_re.findall(req.text)
             # Check if the database contains multiple results
             if multi:
+                if len(multi) == 0:
+                    return
                 # Try to guess which one is the code we want (exact match)
-                # try an exact match
-                # logging.debug("Performing Multiple search for ")
-                options = [suffix for suffix, icode in multi if icode == code]
+                options = [suffix for suffix, icode, image_url in multi if icode == code]
                 # In the case of an exact match, return the match
                 if len(options) == 1:
                     req = self.s.get(self.access_path.format(lang=lang,
                                                              suffix=options[0]))
-                # Else return all the matches (currently raises error)
                 else:
-                    raise errors.SearchMultipleResults
+                    return [(self.access_path.format(lang="{lang}",
+                                                     suffix=suffix),
+                             icode,
+                             image_url) for suffix, icode, image_url in multi]
+
         return req
 
-    def _extract_metadata(self, req, lang):
+    def _extract_metadata(self, resp):
         """Extracts the relevant metadata from a given request
         @args
         @returns
             dictionary containing the raw metadata in the following structure
         """
-        text = req.text
+        text = resp.text
 
         title = self._unpack_search(self.title_re.search(text))
         star = self.star_re.findall(text)
@@ -121,27 +128,71 @@ class JavlibrarySearcher(SiteSearcher):
         director = self._unpack_search(self.director_re.search(text))
         release_date = self._unpack_search(self.release_date_re.search(text))
         code = self._unpack_search(self.code_re.search(text))
-        image_path = self._unpack_search(self.image_re.search(text))
+        image_url = self._unpack_search(self.image_re.search(text))
 
         # Create the tags from the genre and star fields
-        tags = [TagData("star", star_name, lang) for star_name in star] + [TagData("genre", genre_name, lang) for genre_name in genre]
+        tags = [genre_name for genre_name in genre]
+        stars = [star_name for star_name in star]
         return {"title": title,
                 "code": code,
                 "tags": tags,
+                "stars": stars,
                 "maker": maker,
                 "label": label,
                 "director": director,
                 "release_date": release_date,
-                "image_path": image_path}
+                "image_url": image_url}
 
-    def search(self, code, topn=10):
+    def _process_page(self, search_data):
+        """Handles the processing of a single page from normalize_search. Maybe raise and catch if multiple
+        @args
+            search data (response or list): . If list, hands over to process_pages
+        """
+        if isinstance(search_data, list):
+            raise TypeError("Iterable input when singular expected")
+        # If it's gotten this far, we know the search_data is a http response
+        resp = search_data
         for num, lang in enumerate(self.langs):
-            req = self._search_code(code, lang)
-            req = self._normalize_search(code, req, lang)
-            metadata = self._extract_metadata(req, lang)
+            metadata = self._extract_metadata(resp)
+            # Initialize the result object using the first language
             if num == 0:
-                res = VideoMetadata(metadata["code"], metadata["release_date"], metadata["tags"],
-                                    metadata["directpr"], metadata["maker"], metadata["label"],
-                                    metadata["image_path"])
+                # Create the taglist for the video
+                tags = [self.tm[tag] for tag in metadata["tags"]]
+                stars = [self.tm.get_or_create(star, "star") for star in metadata["stars"]]
+                tags += stars
+                res = VideoMetadata(metadata["code"], metadata["release_date"], tags,
+                                    metadata["director"], metadata["maker"], metadata["label"],
+                                    metadata["image_url"])
+
+            # If we're looking at not the first language, we'll need to pull the data.
+            # We do it here to requnce query count, since this bit is slow
+            if num != 0:
+                resp = self.s.get(resp.url.replace(".com/en/", f".com/{lang}/"))
+                metadata = self._extract_metadata(resp)
+
             res.title[lang] = metadata["title"]
+        return res
+
+    def process_pages(self, search_data, topn=10):
+        targets = None
+
+    def search(self, code, topn=5, return_multi=False):
+        """Flow is as follows: Seach using english -> Identify pages/candidate pages
+        -> For top N pages, extract information for each language (Currently implement using multiple queries)
+        @ args
+            code
+            topn
+            return_multi
+        @ returns
+            FIGURE THIS ONE OUT
+        """
+        resp = self._search_code(code)
+        search_data = self._normalize_search(code, resp)
+        try:
+            res = self._process_page(search_data)
+        except TypeError:
+            if return_multi:
+                res = self._process_pages(search_data, topn)
+            else:
+                res = None
         return res

@@ -9,7 +9,8 @@ class QuerySet:
     Data object representing a query of a given video database with a code
     Iterating over iterates over the metadata
     @args
-        metadata (iterable of VideoMetadata): Metadata objects for each code provided
+        
+         (iterable of VideoMetadata): Metadata objects for each code provided
     """
 
     def __init__(self, metadata):
@@ -36,10 +37,10 @@ class VideoMetadata:
         self.maker = maker
         self.lable = label
         # Only the titles change language
-        self.titles = {}
+        self.title = {}
 
     def __repr__(self):
-        f"<VideoMetadata:code={self.code}|tags={self.tags}>"
+        return f"<VideoMetadata:code={self.code}|tags={self.tags}>"
 
 # Tag related data
 class Tag:
@@ -56,7 +57,7 @@ class Tag:
         self.base_lang = base_lang
 
     def __repr__(self):
-        return f"<Tag: id={self.id}, data={self.data[self.base_lang ]}>"
+        return f"<Tag: id={self.id}, data={self.data[self.base_lang]}>"
 
 
 class TagData:
