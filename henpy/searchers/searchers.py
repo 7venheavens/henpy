@@ -1,16 +1,19 @@
 import re
 import requests
 import cfscrape
+import logging
 from abc import ABC, abstractmethod
 from henpy.models import Tag, TagData, VideoMetadata
 
 
 class SiteSearcher(ABC):
-    """Dummpy prototype for generic API for data retrieval from a specific site
+    """Dummy prototype for generic API for data retrieval from a specific site
     """
 
     def __init__(self, tag_manager):
         """General init method
+        @args
+            tag_manager
         """
         self.tm = tag_manager
 
@@ -180,9 +183,10 @@ class JavlibrarySearcher(SiteSearcher):
         """Flow is as follows: Seach using english -> Identify pages/candidate pages
         -> For top N pages, extract information for each language (Currently implement using multiple queries)
         @ args
-            code
-            topn
-            return_multi
+            code (string):
+            topn (int): Top n results to use to query if any
+            return_multi (bool): Should search return multiple entries. If true, returns all entries
+                                 as a list regardless of the length
         @ returns
             FIGURE THIS ONE OUT
         """
@@ -195,4 +199,7 @@ class JavlibrarySearcher(SiteSearcher):
                 res = self._process_pages(search_data, topn)
             else:
                 res = None
+
+        if return_multi:
+            return [res]
         return res
