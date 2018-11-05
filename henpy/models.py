@@ -45,13 +45,18 @@ class VideoMetadata:
 # Tag related data
 class Tag:
     """Tag object
-    @args
-        id
-        base_lang (str): Base language to store tag data in. Default English ("en").
-                         Japanese ("jp") available
+    @attrs
+        id (int):
+        self.data (dict): Contains TagData objects keyed by language
     """
 
     def __init__(self, id, base_lang="en"):
+        """
+        @args
+        id (int): Unique key to identify a tag
+        base_lang (str): Base language to store tag data in. Default English ("en").
+                         Japanese ("jp") available
+        """
         self.id = id
         self.data = {}
         self.base_lang = base_lang
@@ -61,13 +66,14 @@ class Tag:
 
 
 class TagData:
-    def __init__(self, tag_type, name, lang, display_name=None):
-        """
+    def __init__(self, tag_type, name, lang, display_name=None, committed=True):
+        """Information for a specific tag object
         @args:
             tag_type (str): Type of tag star, act, play, etc
             name (str): Unique name of the tag
             lang
             display_name
+            comitted (): Has the tag been persisted?
         """
         self.type = tag_type
         self.name = name
@@ -75,6 +81,7 @@ class TagData:
         self.display_name = display_name
         if display_name is None:
             self.display_name = name
+        self.committed = committed
 
     def __repr__(self):
         return f"<TagData:{self.type}-{self.name}>"
