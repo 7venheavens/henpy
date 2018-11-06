@@ -1,5 +1,8 @@
 """
-General use models for data acquisition
+General use models for data acquisition.
+
+Note: these are not database models. These are simply to hold the raw tag information
+      extracted from the database of choice
 """
 
 from datetime import datetime
@@ -35,7 +38,7 @@ class VideoMetadata:
         self.image_path = image_path
         self.director = director
         self.maker = maker
-        self.lable = label
+        self.label = label
         # Only the titles change language
         self.title = {}
 
@@ -50,19 +53,19 @@ class Tag:
         self.data (dict): Contains TagData objects keyed by language
     """
 
-    def __init__(self, id, base_lang="en"):
+    def __init__(self, base_lang="en"):
         """
         @args
-        id (int): Unique key to identify a tag
+        # id (int): Unique key to identify a tag
         base_lang (str): Base language to store tag data in. Default English ("en").
                          Japanese ("jp") available
         """
-        self.id = id
+        # self.id = id
         self.data = {}
         self.base_lang = base_lang
 
     def __repr__(self):
-        return f"<Tag: id={self.id}, data={self.data[self.base_lang]}>"
+        return f"<Tag:data={self.data[self.base_lang]}>"
 
 
 class TagData:

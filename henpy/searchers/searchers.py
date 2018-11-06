@@ -15,6 +15,7 @@ class SiteSearcher(ABC):
         @args
             tag_manager
         """
+        pass
         self.tm = tag_manager
 
     @abstractmethod
@@ -160,7 +161,7 @@ class JavlibrarySearcher(SiteSearcher):
             # Initialize the result object using the first language
             if num == 0:
                 # Create the taglist for the video
-                tags = [self.tm[tag] for tag in metadata["tags"]]
+                tags = [self.tm.get_or_create(tag, "genre") for tag in metadata["tags"]]
                 stars = [self.tm.get_or_create(star, "star") for star in metadata["stars"]]
                 tags += stars
                 res = VideoMetadata(metadata["code"], metadata["release_date"], tags,
@@ -168,7 +169,7 @@ class JavlibrarySearcher(SiteSearcher):
                                     metadata["image_url"])
 
             # If we're looking at not the first language, we'll need to pull the data.
-            # We do it here to requnce query count, since this bit is slow
+            # We do it here to reduce query count, since this bit is slow
             if num != 0:
                 resp = self.s.get(resp.url.replace(".com/en/", f".com/{lang}/"))
                 metadata = self._extract_metadata(resp)
