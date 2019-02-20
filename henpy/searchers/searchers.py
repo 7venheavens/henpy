@@ -23,7 +23,7 @@ class SiteSearcher(ABC):
         """Queries the remote site with a given code and acquires the metadata for the query.
 
         @args
-            code (str): Unicode encoded string containing video code to quey with
+            code (str): Unicode encoded string containing video code to query with
             topn (int): Number of entries to return given a multiple-match scenario
         @returns
             Iterable QuerySet object containing multiple VideoMetadata objects
@@ -32,7 +32,12 @@ class SiteSearcher(ABC):
 
 
 class JavlibrarySearcher(SiteSearcher):
-    def __init__(self, tag_manager):
+    def __init__(self, tag_manager, normalizer=None):
+        """
+        @args
+            tag_manager
+            normalizer (Normalizer file to use, if any, to normalize tag names)
+        """
         super().__init__(tag_manager)
         self.search_path = "http://www.javlibrary.com/{lang}/vl_searchbyid.php?keyword={code}"
         # Where it ends up if it fails (0 or >1 entries)
@@ -152,8 +157,9 @@ class JavlibrarySearcher(SiteSearcher):
         @args
             search data (response or list): . If list, hands over to process_pages
         """
+        # We'll figure out how to handle the multimatches later
         if isinstance(search_data, list):
-            raise TypeError("Iterable input when singular expected")
+            raise NotImplementedError("Multiple match input not yet handled")
         # If it's gotten this far, we know the search_data is a http response
         resp = search_data
         for num, lang in enumerate(self.langs):

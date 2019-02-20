@@ -10,7 +10,7 @@ Base = declarative_base()
 # Association table for many2many video tag relatiojn
 video_tag = Table("video_tag", Base.metadata,
                   Column("video_id", Integer, ForeignKey("video.id")),
-                  Column("tag_id", Integer, ForeignKey("tag.id")),)
+                  Column("tag_id", Integer, ForeignKey("tag.id")), index=True)
 
 
 class Tag(Base):
