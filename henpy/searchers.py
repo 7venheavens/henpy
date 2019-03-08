@@ -2,21 +2,27 @@ import re
 import requests
 import cfscrape
 import logging
+import os
+
 from abc import ABC, abstractmethod
+from functools import lru_cache
+
 from henpy.models import Tag, TagData, VideoMetadata
+from henpy.dummy import DummySession
+
+
+logger = logging.getLogger(__name__)
 
 
 class SiteSearcher(ABC):
     """Dummy prototype for generic API for data retrieval from a specific site
     """
 
-    def __init__(self, tag_manager):
+    def __init__(self):
         """General init method
         @args
-            tag_manager
         """
         pass
-        self.tm = tag_manager
 
     @abstractmethod
     def search(self, code, topn=10):
@@ -32,13 +38,15 @@ class SiteSearcher(ABC):
 
 
 class JavlibrarySearcher(SiteSearcher):
-    def __init__(self, tag_manager, normalizer=None):
+    def __init__(self, normalizer=None, debug=False):
         """
         @args
-            tag_manager
             normalizer (Normalizer file to use, if any, to normalize tag names)
+            debug (bool / string): if None or False, run as per normal. Expects a path to a folder
+                                   containing html files keyed by id containing dumps. This is to improve
+                                   testing and debugging
         """
-        super().__init__(tag_manager)
+        super().__init__()
         self.search_path = "http://www.javlibrary.com/{lang}/vl_searchbyid.php?keyword={code}"
         # Where it ends up if it fails (0 or >1 entries)
         self.fail_path = "http://www.javlibrary.com/{0}/vl_search"
@@ -64,9 +72,17 @@ class JavlibrarySearcher(SiteSearcher):
         # image_url regex
         self.image_re = re.compile(r'video_jacket_img" src="(\/\/[\w+\.\/]+)"')
 
-        # Session initialization
-        session = requests.Session()
-        self.s = cfscrape.create_scraper(sess=session)
+        # Debug enablers
+        self.debug = debug
+        if self.debug:
+            assert(os.path.exists(debug))
+            self.s = DummySession(debug)
+        else:
+            # Session initialization
+            session = requests.Session()
+            logging.info("Creating Cloudflare scraper")
+            self.s = cfscrape.create_scraper(sess=session)
+            logging.info("Finished creating Cloudflare scraper")
 
     def _unpack_search(self, obj):
         """Unpacks a re.search object, return "" if obj is none
@@ -86,49 +102,59 @@ class JavlibrarySearcher(SiteSearcher):
         if lang is None:
             lang = self.langs[0]
         site = self.search_path.format(lang=lang, code=code)
-        req = self.s.get(site)
-        req.raise_for_status()
-        return req
+        resp = self.s.get(site)
+        resp.raise_for_status()
+        return resp
 
-    def _normalize_search(self, code, req):
+    def _normalize_search(self, code, resp, guess_with_code=True):
         """Handles the raw search result. Correcting for missing / duplicate entries
         @args
-            req: request object to process for information
+            code (str): Code of the video
+            resp: response object to process for information
+            guess_with_code (bool): If True, uses exact matches to the code to filter out
+                                    the targets.
         @returns
-            response containing the single page if only one entry is present,
-            or an iterable of all page_paths if multiple matching detected
+            response object or list of (url, code, image_url) tuples
+            if only one entry is present, response is provided
+            if no results found (empty seach), empty list provided
+            if multimatch (url, code, image_url provided)
         """
-        req.raise_for_status()
+        resp.raise_for_status()
         lang = self.langs[0]
-        if req.url.startswith(self.fail_path.format(lang)):
-            # multi re returns a list of (path, code) tuples
-            multi = self.multi_results_re.findall(req.text)
+        if resp.url.startswith(self.fail_path.format(lang)):
+            logger.debug(f"Multiple hit found for code={code}. path={resp.url}")
+            # multi re returns a list of (suffix, code, image_url) tuples
+            multi = self.multi_results_re.findall(resp.text)
+            logging.debug(f"Multi_results: {multi}")
             # Check if the database contains multiple results
             if multi:
+                # if no entires found on page, return empty list
                 if len(multi) == 0:
-                    return
+                    return []
                 # Try to guess which one is the code we want (exact match)
-                options = [suffix for suffix, icode, image_url in multi if icode == code]
+                if guess_with_code:
+                    options = [suffix for suffix, icode, image_url in multi if icode == code]
+                else:
+                    options = [suffix for suffix, icode, image_url in multi]
                 # In the case of an exact match, return the match
                 if len(options) == 1:
-                    req = self.s.get(self.access_path.format(lang=lang,
-                                                             suffix=options[0]))
+                    resp = self.s.get(self.access_path.format(lang=lang,
+                                                              suffix=options[0]))
                 else:
                     return [(self.access_path.format(lang="{lang}",
                                                      suffix=suffix),
                              icode,
                              image_url) for suffix, icode, image_url in multi]
 
-        return req
+        return resp
 
-    def _extract_metadata(self, resp):
+    def _extract_metadata(self, text):
         """Extracts the relevant metadata from a given request
         @args
+            text (str): Raw html for a given
         @returns
             dictionary containing the raw metadata in the following structure
         """
-        text = resp.text
-
         title = self._unpack_search(self.title_re.search(text))
         star = self.star_re.findall(text)
         genre = self.genre_re.findall(text)
@@ -159,34 +185,51 @@ class JavlibrarySearcher(SiteSearcher):
         """
         # We'll figure out how to handle the multimatches later
         if isinstance(search_data, list):
+            logging.debug(search_data)
             raise NotImplementedError("Multiple match input not yet handled")
         # If it's gotten this far, we know the search_data is a http response
         resp = search_data
         for num, lang in enumerate(self.langs):
-            metadata = self._extract_metadata(resp)
+            metadata = self._extract_metadata(resp.text)
             # Initialize the result object using the first language
             if num == 0:
                 # Create the taglist for the video
-                tags = [self.tm.get_or_create(tag, "genre") for tag in metadata["tags"]]
-                stars = [self.tm.get_or_create(star, "star") for star in metadata["stars"]]
-                tags += stars
+                tags = [tag for tag in metadata["tags"]]
+                stars = [star for star in metadata["stars"]]
                 res = VideoMetadata(metadata["code"], metadata["release_date"], tags,
                                     metadata["director"], metadata["maker"], metadata["label"],
-                                    metadata["image_url"])
+                                    metadata["image_url"], stars)
 
             # If we're looking at not the first language, we'll need to pull the data.
             # We do it here to reduce query count, since this bit is slow
             if num != 0:
                 resp = self.s.get(resp.url.replace(".com/en/", f".com/{lang}/"))
-                metadata = self._extract_metadata(resp)
+                metadata = self._extract_metadata(resp.text)
 
             res.title[lang] = metadata["title"]
         return res
 
     def process_pages(self, search_data, topn=10):
-        targets = None
+        """
+        @args
+            search_data (tuple (url, code, image_url))
+        @returns
 
-    def search(self, code, topn=5, return_multi=False):
+        """
+        search_data = search_data[:topn]
+        res = []
+        lang = self.langs[0]
+        for url, code, image_url in search_data:
+            logger.debug(f"Processing url={url} with code={code}")
+            resp = self.s.get(url.format(lang=lang))
+            video = self._process_page(resp)
+            logger.debug(f"video={video}")
+            res.append(video)
+
+        return res
+
+    @lru_cache(maxsize=128)
+    def search(self, code, topn=5, return_multi=False, **kwargs):
         """Flow is as follows: Seach using english -> Identify pages/candidate pages
         -> For top N pages, extract information for each language (Currently implement using multiple queries)
         @ args
@@ -198,15 +241,19 @@ class JavlibrarySearcher(SiteSearcher):
             FIGURE THIS ONE OUT
         """
         resp = self._search_code(code)
-        search_data = self._normalize_search(code, resp)
-        try:
+        search_data = self._normalize_search(code, resp, **kwargs)
+        logging.debug(f"search_data: {search_data}")
+        if not isinstance(search_data, list):
             res = self._process_page(search_data)
-        except TypeError:
+            logging.debug(f"Search result: {res}")
+        else:
+            logging.debug("Multiple search targets found: {search_data}")
             if return_multi:
-                res = self._process_pages(search_data, topn)
+                res = self.process_pages(search_data, topn=topn)
             else:
+                logging.info(f"Multiple matches found for code={code}")
                 res = None
-
-        if return_multi:
+        # Quick hack to return a list if necessary
+        if return_multi and not isinstance(res, list):
             return [res]
         return res
