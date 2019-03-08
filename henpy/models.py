@@ -7,13 +7,14 @@ Note: these are not database models. These are simply to hold the raw tag inform
 
 from datetime import datetime
 
+
 class QuerySet:
     """
     Data object representing a query of a given video database with a code
     Iterating over iterates over the metadata
     @args
-        
          (iterable of VideoMetadata): Metadata objects for each code provided
+    @returns
     """
 
     def __init__(self, metadata):
@@ -29,7 +30,7 @@ class VideoMetadata:
 
     def __init__(self, code, release_date, tags,
                  director, maker, label,
-                 image_path):
+                 image_path, stars):
         """
         """
         self.code = code
@@ -39,11 +40,13 @@ class VideoMetadata:
         self.director = director
         self.maker = maker
         self.label = label
+        self.stars = stars
         # Only the titles change language
         self.title = {}
 
     def __repr__(self):
-        return f"<VideoMetadata:code={self.code}|tags={self.tags}>"
+        return f"<VideoMetadata:code={self.code}|tags={self.tags}|stars={self.stars}>"
+
 
 # Tag related data
 class Tag:

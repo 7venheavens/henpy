@@ -9,14 +9,14 @@ Base = declarative_base()
 
 # Association table for many2many video tag relatiojn
 video_tag = Table("video_tag", Base.metadata,
-                  Column("video_id", Integer, ForeignKey("video.id")),
-                  Column("tag_id", Integer, ForeignKey("tag.id")), index=True)
+                  Column("video_id", Integer, ForeignKey("video.id"), index=True),
+                  Column("tag_id", Integer, ForeignKey("tag.id"), index=True))
 
 
 class Tag(Base):
     """
     @attrs
-        id
+        id (integer): unique ID for a tag
         name
         data
     """
@@ -50,6 +50,8 @@ class TagData(Base):
 
 
 class Video(Base):
+    """Core video data containing all data of interest
+    """
     __tablename__ = "video"
 
     id = Column(Integer, primary_key=True)
