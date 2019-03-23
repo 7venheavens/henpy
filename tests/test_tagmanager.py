@@ -2,7 +2,7 @@ import pytest
 import os
 import logging
 
-from henpy.utilities import tagtools as tt
+from henpy.persist import tagtools as tt
 from henpy.persist.tables import Tag
 
 TEST_DIR = os.path.split(__file__)[0]
@@ -36,5 +36,3 @@ def test_tag_initialization_from_file(empty_db):
     # Check if the data is loaded properly under the hood
     tags = tm.session.query(Tag).filter(Tag.data.any(type="theme")).all()
     assert(len(tags) == 4)
-
-
