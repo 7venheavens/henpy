@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 class DummySession:
     def __init__(self, cached_pages_dir):
+        logger.debug(f"Initiating dummy session with cache_dir={cached_pages_dir}")
         self.cache_dir = cached_pages_dir
         self.path_regex = r"""http://www.javlibrary.com/(ja|en)(/)"""
         self.url_map = self._build_url_map(self.cache_dir)
@@ -25,7 +26,7 @@ class DummySession:
         for metadatum_path in metadata_paths:
             with open(metadatum_path,
                       encoding="utf-8") as f:
-                metadata = yaml.load(f)
+                metadata = yaml.load(f, Loader=yaml.FullLoader)
             if "html_suffix" in metadata:
                 html_path = os.path.join(self.cache_dir, metadata["html_suffix"])
             else:
@@ -50,7 +51,6 @@ class DummySession:
         resp.url = metadata["url"]
         resp.status_code = 200
         return resp
-
 
     def _get_cached_search(self, code, lang):
         """Creates a response object instead of querying data from the site (speed up tests)

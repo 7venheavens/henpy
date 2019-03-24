@@ -31,7 +31,17 @@ class VideoMetadata:
     def __init__(self, code, release_date, tags,
                  director, maker, label,
                  image_path, stars):
-        """
+        """Initiation assumnes that the tags are all using english language database
+        (Or whatever the default is)
+        Args:
+            code (str): Description
+            release_date (str): Description
+            tags (list=> tuple(str, str)): Description
+            director (tuple(str, str)): Description
+            maker (tuple(str, str)): Description
+            label (tuple(str, str)): Description
+            image_path (tuple(str, str)): source_tag_id, tag_name
+            stars (list=> tuple(str, str)): Description
         """
         self.code = code
         self.release_date = release_date
