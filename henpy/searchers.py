@@ -6,9 +6,11 @@ import os
 
 from abc import ABC, abstractmethod
 from functools import lru_cache
+from datetime import datetime
 
-from henpy.models import Tag, TagData, VideoMetadata
+from henpy.models import VideoMetadata
 from henpy.dummy import DummySession
+from henpy.misc import cached_pages_dir
 
 
 logger = logging.getLogger(__name__)
@@ -22,7 +24,32 @@ class SiteSearcher(ABC):
         """General init method
         @args
         """
-        pass
+        if not self.__source_tag__:
+            raise
+
+    @property
+    def __st__(self):
+        """Shorthand for the source_tag
+        """
+        return self.__source_tag__
+
+    def _tag_sid(self, term):
+        """Tags the source id of a given field with the source tag
+
+        Args:
+            term (str): term to be tagged
+        """
+        return f"{self.__st__}_{term}"
+
+    def tag_sid(self, obj):
+        """Helper function that applies sid to a tuple of (sid, <other thing>)
+
+        Args:
+            obj (obj): object
+        """
+        if not obj:
+            return None
+        return (self._tag_sid(obj[0]), obj[1])
 
     @abstractmethod
     def search(self, code, topn=10):
@@ -38,6 +65,8 @@ class SiteSearcher(ABC):
 
 
 class JavlibrarySearcher(SiteSearcher):
+    __source_tag__ = "javlib"
+
     def __init__(self, normalizer=None, debug=False):
         """
         @args
@@ -55,11 +84,11 @@ class JavlibrarySearcher(SiteSearcher):
         self.langs = ["en", "ja"]
 
         # Regexes for the acquisiton of metadata
-        self.star_re = re.compile(r'vl\_star\.php\?s\=[a-z0-9]{1,10}" rel="tag">(.{1,20})</a>')
-        self.genre_re = re.compile(r'vl\_genre\.php\?g=[a-z0-9]+" rel="category tag">(.{1,20})</a>')
-        self.director_re = re.compile(r'vl\_director\.php\?d=[a-z0-9]+" rel="tag">(.{1,20})</a>')
-        self.maker_re = re.compile(r'vl\_maker\.php\?m=[a-z0-9]+"\srel="tag">(.{1,20})</a>')
-        self.label_re = re.compile(r'vl\_label\.php\?l=[a-z0-9]+"\srel="tag">(.{1,20})</a>')
+        self.star_re = re.compile(r'vl\_star\.php\?s\=([a-z0-9]{1,10})" rel="tag">(.{1,20})</a>')
+        self.genre_re = re.compile(r'vl\_genre\.php\?g=([a-z0-9]+)" rel="category tag">(.{1,20})</a>')
+        self.director_re = re.compile(r'vl\_director\.php\?d=([a-z0-9]+)" rel="tag">(.{1,20})</a>')
+        self.maker_re = re.compile(r'vl\_maker\.php\?m=([a-z0-9]+)"\srel="tag">(.{1,20})</a>')
+        self.label_re = re.compile(r'vl\_label\.php\?l=([a-z0-9]+)"\srel="tag">(.{1,20})</a>')
         self.title_re = re.compile(r'<meta property="og:title" content=".*? (.*) - JAVLibrary" \/>')
         self.release_date_re = re.compile(r'video_date.*\n.*\n.*\n.*\n.*"text">(.*)<\/td>', re.MULTILINE)
         self.image_re = re.compile(r'video_jacket_img" src="(.*\.jpg)" ')
@@ -75,6 +104,8 @@ class JavlibrarySearcher(SiteSearcher):
         # Debug enablers
         self.debug = debug
         if self.debug:
+            if debug is True:
+                debug = cached_pages_dir
             assert(os.path.exists(debug))
             self.s = DummySession(debug)
         else:
@@ -88,8 +119,13 @@ class JavlibrarySearcher(SiteSearcher):
         """Unpacks a re.search object, return "" if obj is none
         """
         if not obj:
-            return ""
+            return ("NULL", "NULL")
         return obj.group(1)
+
+    def _unpack_findall(self, obj):
+        if not obj:
+            return ("NULL", "NULL")
+        return obj[0]
 
     def _search_code(self, code, lang=None):
         """Performs a search of the code against the selected web database with specified language
@@ -154,20 +190,39 @@ class JavlibrarySearcher(SiteSearcher):
             text (str): Raw html for a given
         @returns
             dictionary containing the raw metadata in the following structure
+                title: string
+                code: string
+                tags: list of (source_id, name) tuples
+                stars: list of (source_id, name) tuples
+                label: (source_id, name) tuple
+                director: (source_id, name) tuple
+                release_date: string?
+                image_url: string
         """
         title = self._unpack_search(self.title_re.search(text))
         star = self.star_re.findall(text)
         genre = self.genre_re.findall(text)
-        maker = self._unpack_search(self.maker_re.search(text))
-        label = self._unpack_search(self.label_re.search(text))
-        director = self._unpack_search(self.director_re.search(text))
+        maker = self._unpack_findall(self.maker_re.findall(text))
+        label = self._unpack_findall(self.label_re.findall(text))
+        director = self._unpack_findall(self.director_re.findall(text))
         release_date = self._unpack_search(self.release_date_re.search(text))
+
+        # Convert the release_date into a datetime object
+        if release_date:
+            release_date = datetime.strptime(release_date, "%Y-%m-%d")
         code = self._unpack_search(self.code_re.search(text))
         image_url = self._unpack_search(self.image_re.search(text))
 
         # Create the tags from the genre and star fields
         tags = [genre_name for genre_name in genre]
         stars = [star_name for star_name in star]
+
+        # Prepend the searcher source tag to all the source_ids
+        tags = [(self.__st__ + "_" + sid, name) for sid, name in tags]
+        stars = [(self.__st__ + "_" + sid, name) for sid, name in stars]
+        label, maker, director = [(self.__st__ + "_" + sid,
+                                   name) for sid, name in [label, maker, director]]
+
         return {"title": title,
                 "code": code,
                 "tags": tags,
@@ -251,8 +306,7 @@ class JavlibrarySearcher(SiteSearcher):
             if return_multi:
                 res = self.process_pages(search_data, topn=topn)
             else:
-                logging.info(f"Multiple matches found for code={code}")
-                res = None
+                raise Exception(f"Multiple matches found for code={code}. Enable return_multi to view")
         # Quick hack to return a list if necessary
         if return_multi and not isinstance(res, list):
             return [res]
